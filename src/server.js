@@ -347,8 +347,17 @@ class Server extends Base {
     }
 
     var result = operation(args, handleResult, options.headers, req);
-    if (typeof result !== 'undefined') {
-      handleResult(null, result);
+    if (result.then) {
+      result.then((result2) => {
+        if (typeof result !== 'undefined') {
+          handleResult(null, result2);
+        }
+      });
+    }
+    else {
+      if (typeof result !== 'undefined') {
+        handleResult(null, result);
+      }
     }
   };
 
