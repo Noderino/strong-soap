@@ -352,6 +352,8 @@ class Server extends Base {
         if (typeof result !== 'undefined') {
           handleResult(null, result2);
         }
+      }).catch((error) => {
+        handleResult(error, null);
       });
     }
     else {
