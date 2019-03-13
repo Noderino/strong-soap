@@ -41,7 +41,7 @@ class Server extends Base {
         //handle only the required URL path for express server
         server.route(path).all(function (req, res, next) {
           if (typeof self.authorizeConnection === 'function') {
-            if (!self.authorizeConnection(req.connection.remoteAddress)) {
+            if (!self.authorizeConnection(req)) {
               res.end();
               return;
             }
