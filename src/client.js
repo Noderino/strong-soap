@@ -146,6 +146,8 @@ class Client extends Base {
       soapAction = ((ns.lastIndexOf("/") !== ns.length - 1) ? ns + "/" : ns) + name;
     }
 
+    headers['Content-Type'] += '; action="' + soapAction + '"';
+
     if (soapVersion !== '1.2' || operation.soapActionRequired) {
       headers.SOAPAction = '"' + soapAction + '"';
     }
