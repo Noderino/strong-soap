@@ -107,6 +107,9 @@ class Server extends Base {
       });
       req.on('end', function() {
         const buffer = Buffer.concat(chunks);
+        if (typeof self.onRequestData === 'function') {
+          self.onRequestData(req, buffer);
+        }
         const contentType = req.headers["content-type"] || "";
         var xml;
         if (contentType.indexOf("application/xop+xml") >= 0) {
