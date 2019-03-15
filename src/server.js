@@ -14,8 +14,9 @@ var url = require('url'),
   toXMLDate = require('./utils').toXMLDate,
   util = require('util'),
   debug = require('debug')('strong-soap:server'),
-  debugDetail = require('debug')('strong-soap:server:detail');
-
+  debugDetail = require('debug')('strong-soap:server:detail'),
+  MtomHandler = require("ws.js/lib/handlers/client/mtom/mtom.js").MtomClientHandler;
+  
 try {
   compress = require('compress');
 } catch (error) {
@@ -105,7 +106,20 @@ class Server extends Base {
         chunks.push(chunk);
       });
       req.on('end', function() {
-        var xml = chunks.join('');
+        const buffer = Buffer.concat(chunks);
+        const contentType = req.headers["content-type"] || "";
+        var xml;
+        if (contentType.indexOf("application/xop+xml") >= 0) {
+          const mtom = new MtomHandler();
+          var ctx = mtom.receive({
+            resp_contentType: contentType,
+            response: buffer
+          }, () => {});
+          xml = ctx.response.toString();
+        } else {
+          xml = buffer.toString();
+        }
+
         var result;
         var error;
         if (gunzip) {

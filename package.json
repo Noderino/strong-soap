@@ -17,7 +17,8 @@
     "strong-globalize": "^4.1.3",
     "uuid": "^3.2.1",
     "xml-crypto": "^1.4.0",
-    "xmlbuilder": "^10.1.1"
+    "xmlbuilder": "^10.1.1",
+    "ws.js": "https://github.com/eMuonTau/ws.js.git"
   },
   "repository": {
     "type": "git",
