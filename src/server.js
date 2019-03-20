@@ -114,11 +114,12 @@ class Server extends Base {
         var xml;
         if (contentType.indexOf("application/xop+xml") >= 0) {
           const mtom = new MtomHandler();
-          var ctx = mtom.receive({
+          mtom.receive({
             resp_contentType: contentType,
             response: buffer
-          }, () => {});
-          xml = ctx.response.toString();
+          }, (ctx) => {
+            xml = ctx.response.toString();
+          });
         } else {
           xml = buffer.toString();
         }
