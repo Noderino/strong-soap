@@ -14,8 +14,7 @@ var url = require('url'),
   toXMLDate = require('./utils').toXMLDate,
   util = require('util'),
   debug = require('debug')('strong-soap:server'),
-  debugDetail = require('debug')('strong-soap:server:detail'),
-  MtomHandler = require("ws.js/lib/handlers/client/mtom/mtom.js").MtomClientHandler;
+  debugDetail = require('debug')('strong-soap:server:detail')
   
 try {
   compress = require('compress');
@@ -106,23 +105,14 @@ class Server extends Base {
         chunks.push(chunk);
       });
       req.on('end', function() {
-        const buffer = Buffer.concat(chunks);
+        var buffer = Buffer.concat(chunks);
+        
         if (typeof self.onRequestData === 'function') {
-          self.onRequestData(req, buffer);
+          var returnedBuffer = self.onRequestData(req, buffer);
+          buffer = returnedBuffer || buffer;
         }
-        const contentType = req.headers["content-type"] || "";
-        var xml;
-        if (contentType.indexOf("application/xop+xml") >= 0) {
-          const mtom = new MtomHandler();
-          mtom.receive({
-            resp_contentType: contentType,
-            response: buffer
-          }, (ctx) => {
-            xml = ctx.response.toString();
-          });
-        } else {
-          xml = buffer.toString();
-        }
+
+        var xml = buffer.toString();
 
         var result;
         var error;
@@ -308,7 +298,7 @@ class Server extends Base {
       return callback(this._envelope('', includeTimestamp));
     }
 
-    function handleResult(error, result) {
+    function handleResult(error, result, req) {
       if (handled)
         return;
       handled = true;
@@ -345,12 +335,23 @@ class Server extends Base {
       var nsContext = self.createNamespaceContext(soapNsPrefix, soapNsURI);
       var envelope = XMLHandler.createSOAPEnvelope(soapNsPrefix, soapNsURI);
 
+      var mtomContext;
+      var outputBodyName = outputBodyDescriptor.elements[0].qname.name;
+      if (result && result.data && result.data[outputBodyName]) {
+        mtomContext = result;
+        result = result.data;
+      }
 
       self.xmlHandler.jsonToXml(envelope.body, nsContext, outputBodyDescriptor, result);
 
       self._envelope(envelope, includeTimestamp);
       var message = envelope.body.toString({pretty: true});
       var xml = envelope.doc.end({pretty: true});
+
+      if (typeof self.onResponseData === 'function') {
+        var returnedXml = self.onResponseData(req, req.res, xml, mtomContext);
+        xml = returnedXml || xml;
+      }
 
       debug('Server handleResult. xml: %s ', xml);
       callback(xml);
@@ -368,15 +369,15 @@ class Server extends Base {
     if (result.then) {
       result.then((result2) => {
         if (typeof result !== 'undefined') {
-          handleResult(null, result2);
+          handleResult(null, result2, req);
         }
       }).catch((error) => {
-        handleResult(error, null);
+        handleResult(error, null, req);
       });
     }
     else {
       if (typeof result !== 'undefined') {
-        handleResult(null, result);
+        handleResult(null, result, req);
       }
     }
   };
