@@ -308,7 +308,7 @@ class Server extends Base {
 
 
       if (error && error.Fault !== undefined) {
-        return self._sendError(operation, error, callback, includeTimestamp);
+        return self._sendError(operation, error, callback, includeTimestamp, req);
       }
       else if (result === undefined) {
         // Backward compatibility to support one argument callback style
@@ -418,7 +418,7 @@ class Server extends Base {
     return env;
   };
 
-  _sendError(operation, error, callback, includeTimestamp) {
+  _sendError(operation, error, callback, includeTimestamp, req) {
     var self = this,
       fault;
 
@@ -455,6 +455,13 @@ class Server extends Base {
 
     debug('Server sendError.  error.Fault: %j ',  error.Fault);
 
+    var mtomContext;
+    var outputBodyName = faultDescriptor.qname.name;
+    if (error && error.data && error.data[outputBodyName]) {
+      mtomContext = error;
+      error = error.data;
+    }
+    
     //serialize Fault object into XML as per faultDescriptor
     this.xmlHandler.jsonToXml(envelope.body, nsContext, faultDescriptor, error.Fault);
 
@@ -462,6 +469,11 @@ class Server extends Base {
     var message = envelope.body.toString({pretty: true});
     var xml = envelope.doc.end({pretty: true});
 
+    if (typeof self.onResponseData === 'function') {
+      var returnedXml = self.onResponseData(req, req.res, xml, mtomContext);
+      xml = returnedXml || xml;
+    }
+    
     debug('Server sendError. Response envelope: %s ', xml);
     callback(xml, statusCode);
   }
