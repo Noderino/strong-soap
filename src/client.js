@@ -232,126 +232,131 @@ class Client extends Base {
     debug('client request, calling jsonToXml. args: %j', args);
     xmlHandler.jsonToXml(soapBodyElement, nsContext, inputBodyDescriptor, args);
 
+    let postProcessResult;
     if (self.security && self.security.postProcess) {
-      self.security.postProcess(envelope.header, envelope.body);
+      postProcessResult = self.security.postProcess(envelope.header, envelope.body)
     }
 
-    //Bydefault pretty print is true and request envelope is created with newlines and indentations
-    var prettyPrint = true;
-    //some web services don't accept request envelope with newlines and indentations in which case user has to set {prettyPrint: false} as client option
-    if (self.httpClient.options && self.httpClient.options.prettyPrint !== undefined) {
-      prettyPrint = self.httpClient.options.prettyPrint;
-    }
-
-    message = envelope.body.toString({pretty: prettyPrint});
-    xml = envelope.doc.end({pretty: prettyPrint});
-
-    debug('Request envelope: %s', xml);
-
-    self.lastMessage = message;
-    self.lastRequest = xml;
-    self.lastEndpoint = location;
-
-    self.emit('message', message);
-    self.emit('request', xml);
-
-    var tryJSONparse = function(body) {
-      try {
-        return JSON.parse(body);
+    Promise.resolve(postProcessResult).then(() => {
+      //Bydefault pretty print is true and request envelope is created with newlines and indentations
+      var prettyPrint = true;
+      //some web services don't accept request envelope with newlines and indentations in which case user has to set {prettyPrint: false} as client option
+      if (self.httpClient.options && self.httpClient.options.prettyPrint !== undefined) {
+        prettyPrint = self.httpClient.options.prettyPrint;
       }
-      catch (err) {
-        return undefined;
-      }
-    };
 
-    req = self.httpClient.request(location, xml, function(err, response, body) {
-      var result;
-      var obj;
-      self.lastResponse = body;
-      self.lastResponseHeaders = response && response.headers;
-      self.lastElapsedTime = response && response.elapsedTime;
-      self.emit('response', body, response);
+      message = envelope.body.toString({ pretty: prettyPrint });
+      xml = envelope.doc.end({ pretty: prettyPrint });
 
-      debug('client response. response: %j body: %j', response, body);
+      debug('Request envelope: %s', xml);
 
-      if (err) {
-        callback(err);
-      } else {
+      self.lastMessage = message;
+      self.lastRequest = xml;
+      self.lastEndpoint = location;
 
-        //figure out if this is a Fault response or normal output from the server.
-        //There seem to be no good way to figure this out other than
-        //checking for <Fault> element in server response.
-        if (body.indexOf('<soap:Fault>') > -1  || body.indexOf('<Fault>') > -1) {
-          var outputEnvDescriptor = operationDescriptor.faultEnvelope;
-        } else  {
-          var outputEnvDescriptor = operationDescriptor.outputEnvelope;
-        }
+      self.emit('message', message);
+      self.emit('request', xml);
+
+      var tryJSONparse = function (body) {
         try {
-          debugDetail('client response. outputEnvDescriptor: %j', outputEnvDescriptor);
-          obj = xmlHandler.xmlToJson(nsContext, body, outputEnvDescriptor);
-        } catch (error) {
-          //  When the output element cannot be looked up in the wsdl and the body is JSON
-          //  instead of sending the error, we pass the body in the response.
-          debug('client response. error message: %s', error.message);
+          return JSON.parse(body);
+        }
+        catch (err) {
+          return undefined;
+        }
+      };
+
+      req = self.httpClient.request(location, xml, function (err, response, body) {
+        var result;
+        var obj;
+        self.lastResponse = body;
+        self.lastResponseHeaders = response && response.headers;
+        self.lastElapsedTime = response && response.elapsedTime;
+        self.emit('response', body, response);
+
+        debug('client response. response: %j body: %j', response, body);
+
+        if (err) {
+          callback(err);
+        } else {
+
+          //figure out if this is a Fault response or normal output from the server.
+          //There seem to be no good way to figure this out other than
+          //checking for <Fault> element in server response.
+          if (body.indexOf('<soap:Fault>') > -1 || body.indexOf('<Fault>') > -1) {
+            var outputEnvDescriptor = operationDescriptor.faultEnvelope;
+          } else {
+            var outputEnvDescriptor = operationDescriptor.outputEnvelope;
+          }
+          try {
+            debugDetail('client response. outputEnvDescriptor: %j', outputEnvDescriptor);
+            obj = xmlHandler.xmlToJson(nsContext, body, outputEnvDescriptor);
+          } catch (error) {
+            //  When the output element cannot be looked up in the wsdl and the body is JSON
+            //  instead of sending the error, we pass the body in the response.
+            debug('client response. error message: %s', error.message);
+
+            if (!output) {
+              debug('client response. output not present');
+              //  If the response is JSON then return it as-is.
+              var json = _.isObject(body) ? body : tryJSONparse(body);
+              if (json) {
+                return callback(null, response, json);
+              }
+            }
+            //Reaches here for Fault processing as well since Fault is thrown as an error in xmlHandler.xmlToJson(..) function.
+            error.response = response;
+            error.body = body;
+            self.emit('soapError', error);
+            return callback(error, response, body);
+          }
 
           if (!output) {
-            debug('client response. output not present');
-            //  If the response is JSON then return it as-is.
-            var json = _.isObject(body) ? body : tryJSONparse(body);
-            if (json) {
-              return callback(null, response, json);
-            }
+            // one-way, no output expected
+            return callback(null, null, body, obj.Header);
           }
-          //Reaches here for Fault processing as well since Fault is thrown as an error in xmlHandler.xmlToJson(..) function.
-          error.response = response;
-          error.body = body;
-          self.emit('soapError', error);
-          return callback(error, response, body);
-        }
+          if (typeof obj.Body !== 'object') {
+            var error = new Error(g.f('Cannot parse response'));
+            error.response = response;
+            error.body = body;
+            return callback(error, obj, body);
+          }
 
-        if (!output) {
-          // one-way, no output expected
-          return callback(null, null, body, obj.Header);
-        }
-        if (typeof obj.Body !== 'object') {
-          var error = new Error(g.f('Cannot parse response'));
-          error.response = response;
-          error.body = body;
-          return callback(error, obj, body);
-        }
+          var outputBodyDescriptor = operationDescriptor.output.body;
+          var outputHeadersDescriptor = operationDescriptor.output.headers;
 
-        var outputBodyDescriptor = operationDescriptor.output.body;
-        var outputHeadersDescriptor = operationDescriptor.output.headers;
+          if (outputBodyDescriptor.elements.length) {
+            result = obj.Body[outputBodyDescriptor.elements[0].qname.name];
+          }
+          // RPC/literal response body may contain elements with added suffixes I.E.
+          // 'Response', or 'Output', or 'Out'
+          // This doesn't necessarily equal the ouput message name. See WSDL 1.1 Section 2.4.5
+          if (!result) {
+            var outputName = output.$name &&
+              output.$name.replace(/(?:Out(?:put)?|Response)$/, '');
+            result = obj.Body[outputName];
+          }
+          if (!result) {
+            ['Response', 'Out', 'Output', '.Response', '.Out', '.Output'].forEach(function(term) {
+              if (obj.Body.hasOwnProperty(name + term)) {
+                return result = obj.Body[name + term];
+              }
+            });
+          }
+          debug('client response. result: %j body: %j obj.Header: %j', result, body, obj.Header);
 
-        if (outputBodyDescriptor.elements.length) {
-          result = obj.Body[outputBodyDescriptor.elements[0].qname.name];
+          callback(null, result, body, obj.Header);
         }
-        // RPC/literal response body may contain elements with added suffixes I.E.
-        // 'Response', or 'Output', or 'Out'
-        // This doesn't necessarily equal the ouput message name. See WSDL 1.1 Section 2.4.5
-        if (!result) {
-          var outputName = output.$name &&
-            output.$name.replace(/(?:Out(?:put)?|Response)$/, '');
-          result = obj.Body[outputName];
-        }
-        if (!result) {
-          ['Response', 'Out', 'Output', '.Response', '.Out', '.Output'].forEach(function(term) {
-            if (obj.Body.hasOwnProperty(name + term)) {
-              return result = obj.Body[name + term];
-            }
-          });
-        }
-        debug('client response. result: %j body: %j obj.Header: %j', result, body, obj.Header);
+      }, headers, options, self);
 
-        callback(null, result, body, obj.Header);
+      // Added mostly for testability, but possibly useful for debugging
+      if (req != null) {
+        self.lastRequestHeaders = req.headers;
       }
-    }, headers, options, self);
-
-    // Added mostly for testability, but possibly useful for debugging
-    if (req != null) {
-      self.lastRequestHeaders = req.headers;
-    }
-    debug('client response. lastRequestHeaders: %j', self.lastRequestHeaders);
+      debug('client response. lastRequestHeaders: %j', self.lastRequestHeaders);
+    }).catch(error => {
+      callback(error)
+    });
   }
 }
 
